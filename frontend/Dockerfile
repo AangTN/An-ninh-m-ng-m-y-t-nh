@@ -15,28 +15,30 @@ RUN npm run build
 # ==========================================
 # Phần 2: Apache Server - Chỉ nhận HTTPS qua Domain
 # ==========================================
-# ==========================================
-# PHẦN 2: APACHE 2.4.49 - PHIÊN BẢN CÓ LỖ HỔNG
-# ==========================================
 FROM httpd:2.4.49
 
-# 1. Bật cgid_module (BẮT BUỘC để demo cả RCE - chiếm quyền điều khiển)
+# 1. Bật các module: SSL, Rewrite, Proxy và Headers (để bảo mật)
 RUN sed -i '/LoadModule ssl_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
     sed -i '/LoadModule socache_shmcb_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
     sed -i '/LoadModule rewrite_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
     sed -i '/LoadModule proxy_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
     sed -i '/LoadModule proxy_http_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
-    sed -i '/LoadModule cgid_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
+    sed -i '/LoadModule headers_module/s/^#//g' /usr/local/apache2/conf/httpd.conf && \
     sed -i 's/AllowOverride None/AllowOverride All/g' /usr/local/apache2/conf/httpd.conf
 
-# 2. Cấu hình VirtualHost "Tự sát"
+# 2. Xóa cấu hình cũ và ghi đè cấu hình VirtualHost nghiêm ngặt
+# Cấu hình này sẽ:
+# - Cổng 80: Chuyển hướng 100% sang HTTPS secretpizza.io.vn
+# - Cổng 443: Nếu không phải tên miền secretpizza.io.vn -> Trả về lỗi 403 (Chặn IP)
 RUN printf 'Listen 443\n\
 \n\
+# --- CẤU HÌNH CỔNG 80: REDIRECT SANG HTTPS ---\n\
 <VirtualHost *:80>\n\
     ServerName secretpizza.io.vn\n\
     Redirect permanent / https://secretpizza.io.vn/\n\
 </VirtualHost>\n\
 \n\
+# --- CẤU HÌNH CỔNG 443: CHỈ NHẬN DOMAIN, CHẶN IP ---\n\
 <VirtualHost *:443>\n\
     ServerName secretpizza.io.vn\n\
     DocumentRoot "/usr/local/apache2/htdocs"\n\
@@ -45,14 +47,19 @@ RUN printf 'Listen 443\n\
     SSLCertificateFile "/usr/local/apache2/conf/ssl/server.crt"\n\
     SSLCertificateKeyFile "/usr/local/apache2/conf/ssl/server.key"\n\
 \n\
-    # --- ĐIỂM YẾU 1: Cho phép truy cập vào thư mục gốc của hệ thống ---\n\
-    <Directory />\n\
-        AllowOverride None\n\
-        Require all granted\n\
-    </Directory>\n\
+    # Chống truy cập bằng IP: Nếu Host không phải là domain thì trả về 403\n\
+    RewriteEngine On\n\
+    RewriteCond %%{HTTP_HOST} !^secretpizza\\.io\\.vn$ [NC]\n\
+    RewriteRule ^ - [F]\n\
 \n\
-    # --- ĐIỂM YẾU 2: ScriptAlias làm bàn đạp để leo trèo ---\n\
-    ScriptAlias /cgi-bin/ "/usr/local/apache2/cgi-bin/"\n\
+    # Ép trình duyệt luôn dùng HTTPS (HSTS)\n\
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"\n\
+\n\
+    # Proxy xuống Backend\n\
+    ProxyPass /api http://backend:3001/api\n\
+    ProxyPassReverse /api http://backend:3001/api\n\
+    ProxyPass /images http://backend:3001/images\n\
+    ProxyPassReverse /images http://backend:3001/images\n\
 \n\
     <Directory "/usr/local/apache2/htdocs">\n\
         AllowOverride All\n\
@@ -61,13 +68,11 @@ RUN printf 'Listen 443\n\
 </VirtualHost>\n' > /usr/local/apache2/conf/extra/httpd-vhosts.conf && \
 echo "Include conf/extra/httpd-vhosts.conf" >> /usr/local/apache2/conf/httpd.conf
 
-# 3. Copy code web
+# 3. Copy code web vào
 RUN rm -rf /usr/local/apache2/htdocs/*
 COPY --from=builder /app/dist/client /usr/local/apache2/htdocs/
 
-# --- LƯU Ý: TẠM THỜI XÓA FallbackResource ---
-# Vì cái này sẽ "nuốt" mọi đường dẫn lạ và trả về index.html, 
-# khiến ta không xem được file /etc/passwd khi demo.
-RUN touch /usr/local/apache2/htdocs/.htaccess
+# 4. Cấu hình .htaccess để tránh lỗi 404 khi F5 React
+RUN echo 'FallbackResource /index.html' > /usr/local/apache2/htdocs/.htaccess
 
 EXPOSE 80 443
