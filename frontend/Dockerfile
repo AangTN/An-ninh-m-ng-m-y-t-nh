@@ -31,7 +31,9 @@ RUN sed -i '/LoadModule rewrite_module/s/^#//g' /usr/local/apache2/conf/httpd.co
 
 # 2. Cấu hình chuyển hướng mọi request "/api" xuống Backend
 RUN echo "ProxyPass /api http://backend:3001/api" >> /usr/local/apache2/conf/httpd.conf && \
-    echo "ProxyPassReverse /api http://backend:3001/api" >> /usr/local/apache2/conf/httpd.conf
+    echo "ProxyPassReverse /api http://backend:3001/api" >> /usr/local/apache2/conf/httpd.conf && \
+    echo "ProxyPass /images http://backend:3001/images" >> /usr/local/apache2/conf/httpd.conf && \
+    echo "ProxyPassReverse /images http://backend:3001/images" >> /usr/local/apache2/conf/httpd.conf
 
 # 3. Xóa code web mặc định của Apache và Copy code dự án vào
 RUN rm -rf /usr/local/apache2/htdocs/*
