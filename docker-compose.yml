@@ -78,6 +78,9 @@ services:
     ports:
       - "80:80"   # Đưa Apache ra cổng 80 máy thật
       - "443:443" # Mở sẵn cổng 443 cho Apache (nếu bạn cài SSL sau này)
+    volumes:
+      # Ánh xạ thư mục certs từ máy thật vào đúng chỗ trong Apache
+      - ./certs:/usr/local/apache2/conf/ssl:ro
     depends_on:
       backend:
         condition: service_healthy
